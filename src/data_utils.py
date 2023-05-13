@@ -6,26 +6,19 @@ import joblib
 # from typing import Tuple
 from sklearn.preprocessing import StandardScaler
 
+# Load data from a CSV file into a pandas dataframe.
 def load_data(file_path: str) -> pd.DataFrame:
-    """
-    Load data from a CSV file into a pandas dataframe.
-    """
     data = pd.read_csv(file_path)
     return data
 
+# Split data into features and labels.
 def split_features_labels(data: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
-    """
-    Split data into features and labels.
-    """
     x = data.drop('label', axis=1)
     y = data['label']
     return x, y
 
-
-def handle_missing_values(data: pd.DataFrame) -> pd.DataFrame:
-    """
-    Fill in missing values in a pandas dataframe with the mean of the column.
-    """
+# Fill in missing values in a pandas dataframe with the mean of the column.
+def fill_missing_values(data: pd.DataFrame) -> pd.DataFrame:
     print(data.isna().sum())
     missing_values = data.isna().sum()
     if missing_values.any():
