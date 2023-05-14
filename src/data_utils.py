@@ -1,100 +1,138 @@
+import matplotlib.pyplot  as plt
+import seaborn as sns
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+import random
+import platform
+import cv2
+import tensorflow as tf
+import IPython.display as display
+import os
+
+from skimage import io, feature, util, color
+from skimage.feature import graycomatrix, graycoprops
 from sklearn.model_selection import train_test_split
-import joblib
-# from typing import Tuple
-from sklearn.preprocessing import StandardScaler
-
-# Load data from a CSV file into a pandas dataframe.
-def load_data(file_path: str) -> pd.DataFrame:
-    data = pd.read_csv(file_path)
-    return data
-
-# Split data into features and labels.
-def split_features_labels(data: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
-    x = data.drop('label', axis=1)
-    y = data['label']
-    return x, y
-
-# Fill in missing values in a pandas dataframe with the mean of the column.
-def fill_missing_values(data: pd.DataFrame) -> pd.DataFrame:
-    print(data.isna().sum())
-    missing_values = data.isna().sum()
-    if missing_values.any():
-        data.fillna(data.mean(), inplace=True)
-    else:
-        print("\nMissing values not found")
-    return data
+from tensorflow import keras
+from PIL import Image
+from imblearn.over_sampling import SMOTE
+from tensorflow import keras
+from keras.layers import Dense
+from keras.models import Sequential, load_model
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 
-def scale_features(data: pd.DataFrame) -> pd.DataFrame:
+def split_dataset(main_data, train_ratio, val_ratio):
     """
-    Scale the features in a pandas dataframe to have zero mean and unit variance.
-    """
-    scaler = StandardScaler()
-    scaled_data = scaler.fit_transform(data)
-    return scaled_data
+    Split the main_data DataFrame into training, validation, and testing sets based on the patientID column.
 
-def scale_features(X_train: pd.DataFrame, X_test: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Scale the features in train and test dataframes to have zero mean and unit variance.
+    Parameters:
+    main_data (DataFrame): the DataFrame containing the image data
+    train_ratio (float): the proportion of data to allocate to the training set (e.g., 0.7 for 70%)
+    val_ratio (float): the proportion of data to allocate to the validation set (e.g., 0.15 for 15%)
 
-    Parameters
-    ----------
-    X_train : pd.DataFrame
-        Training data features
-    X_test : pd.DataFrame
-        Test data features
-
-    Returns
-    -------
-    Tuple[pd.DataFrame, pd.DataFrame]
-        Scaled training and test data features
+    Returns:
+    train_data (DataFrame): the subset of main_data containing the training data
+    val_data (DataFrame): the subset of main_data containing the validation data
+    test_data (DataFrame): the subset of main_data containing the testing data
     """
-    scaler = StandardScaler()
-    scaled_X_train = scaler.fit_transform(X_train)
-    scaled_X_test = scaler.transform(X_test)
-    return scaled_X_train, scaled_X_test
 
+    # Set the random seed for reproducibility to student id
+    np.random.seed(88)
+    
+    # Extract the unique patient IDs from your dataset
+    unique_patients = np.unique(main_data['patientID'])
 
-def encode_labels(labels: pd.Series) -> pd.Series:
-    """
-    Encode categorical labels in a pandas dataframe as numerical values.
-    """
-    encoder = LabelEncoder()
-    encoded_labels = encoder.fit_transform(labels)
-    return encoded_labels
+    # Shuffle the patient IDs
+    np.random.shuffle(unique_patients)
+
+    # Split the list of patient IDs into three disjoint sets
+    train_patients, val_test_patients = np.split(unique_patients, [int(len(unique_patients)*train_ratio)])
+
+    val_patients, test_patients = np.split(val_test_patients, [int(len(val_test_patients)*val_ratio)])
+
+    # Finally, use the patient ID sets to filter the original dataset into training, validation, and testing sets
+    train_data = main_data[main_data['patientID'].isin(train_patients)]
+    val_data = main_data[main_data['patientID'].isin(val_patients)]
+    test_data = main_data[main_data['patientID'].isin(test_patients)]
+
+    return train_data, val_data, test_data
 
 
-def split_data(data: pd.DataFrame, labels: pd.Series, test_size: float = 0.2, random_state: int = 42) -> tuple:
-    """
-    Split the input data and labels into training and testing sets.
-    """
-    X_train, X_test, y_train, y_test = train_test_split(data, labels, test_size=test_size, random_state=random_state)
-    return X_train, X_test, y_train, y_test
 
 
-def preprocess_data(data: pd.DataFrame) -> pd.DataFrame:
+def preprocess_data(image_folder, train_data, val_data, test_data, target_size, batch_size):
     """
-    Preprocess the input data.
-    """
-    data = handle_missing_values(data)
-    data = scale_features(data)
-    return data
+    Preprocesses the image data and creates data generators for training, validation, and testing sets.
 
+    Parameters:
+    image_folder (str): the directory containing the image data
+    train_data (DataFrame): the DataFrame containing the training data
+    val_data (DataFrame): the DataFrame containing the validation data
+    test_data (DataFrame): the DataFrame containing the testing data
+    target_size (tuple): a tuple specifying the target size of the input images
+    batch_size (int): the batch size for the data generators
 
-def split_data_train_val_test(data: pd.DataFrame, test_size: float = 0.2, random_state: int = 42) -> tuple:
+    Returns:
+    output (dict): a dictionary containing the data generators and the number of samples for each set
     """
-    Split the input data into training, validation, and testing sets.
-    """
-    X_train_val, X_test, y_train_val, y_test = split_data(data.iloc[:, :-1], data.iloc[:, -1], test_size=test_size, random_state=random_state)
-    X_train, X_val, y_train, y_val = split_data(X_train_val, y_train_val, test_size=test_size, random_state=random_state)
-    return X_train, X_val, X_test, y_train, y_val, y_test
 
+    # Get the list of image paths for each set
+    train_image_paths = [os.path.join(image_folder, filename) for filename in train_data['ImageName'].values]
+    val_image_paths = [os.path.join(image_folder, filename) for filename in val_data['ImageName'].values]
+    test_image_paths = [os.path.join(image_folder, filename) for filename in test_data['ImageName'].values]
 
-def save_data(data, file_path: str):
-    """
-    Save data to a file.
-    """
-    joblib.dump(data, file_path)
+    # Create data generators for each set
+    train_datagen = ImageDataGenerator(
+        rescale=1./255,
+        rotation_range=20,
+        width_shift_range=0.2,
+        height_shift_range=0.2,
+        shear_range=0.2,
+        zoom_range=0.2,
+        horizontal_flip=True,
+        fill_mode='nearest'
+    )
+    val_datagen = ImageDataGenerator(rescale=1./255)
+    test_datagen = ImageDataGenerator(rescale=1./255)
+
+    train_generator = train_datagen.flow_from_dataframe(
+        train_data,
+        directory=image_folder,
+        x_col='ImageName',
+        y_col='cellType',
+        target_size=target_size,
+        batch_size=batch_size,
+        class_mode='categorical'
+    )
+
+    val_generator = val_datagen.flow_from_dataframe(
+        val_data,
+        directory=image_folder,
+        x_col='ImageName',
+        y_col='cellType',
+        target_size=target_size,
+        batch_size=batch_size,
+        class_mode='categorical'
+    )
+
+    test_generator = test_datagen.flow_from_dataframe(
+        test_data,
+        directory=image_folder,
+        x_col='ImageName',
+        y_col='cellType',
+        target_size=target_size,
+        batch_size=batch_size,
+        class_mode='categorical'
+    )
+
+    # Define the output dictionary
+    output = {
+        'train_generator': train_generator,
+        'val_generator': val_generator,
+        'test_generator': test_generator,
+        'num_train_samples': len(train_data),
+        'num_val_samples': len(val_data),
+        'num_test_samples': len(test_data)
+    }
+
+    return output
